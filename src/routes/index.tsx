@@ -263,11 +263,13 @@ function Dashboard() {
           <p className="mt-1 text-sm text-muted-foreground">
             Match candidates to any job description with AI semantic similarity.
           </p>
-          <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-4">
+          <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
             <StatCard label="Total Candidates" value={stats.total} />
-            <StatCard label="Processed" value={stats.processed} />
-            <StatCard label="Top Matches (≥70%)" value={stats.top} accent />
-            <StatCard label="Avg Match Score" value={`${stats.avg}%`} />
+            <StatCard label="Ranked" value={stats.processed} />
+            <StatCard label="Avg Match" value={`${stats.avg}%`} />
+            <StatCard label="Highest" value={`${stats.highest}%`} accent />
+            <StatCard label="≥ 70% Match" value={stats.top} />
+            <StatCard label="≥ 80% Match" value={stats.top80} />
           </div>
         </section>
 
