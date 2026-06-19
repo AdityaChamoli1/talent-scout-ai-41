@@ -65,6 +65,12 @@ function Dashboard() {
   const [search, setSearch] = useState("");
   const [topN, setTopN] = useState<number>(0); // 0 = all
   const [minScore, setMinScore] = useState(0);
+  const [expFilter, setExpFilter] = useState<string>("any");
+  const [eduFilter, setEduFilter] = useState<string>("any");
+  const [skillFilter, setSkillFilter] = useState<string>("any");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   function handleFile(file: File) {
@@ -132,26 +138,76 @@ function Dashboard() {
         (c) =>
           c.candidate_name.toLowerCase().includes(q) ||
           c.candidate_id.toLowerCase().includes(q) ||
-          c.skills.toLowerCase().includes(q),
+          c.skills.toLowerCase().includes(q) ||
+          c.education.toLowerCase().includes(q),
       );
     }
     if (minScore > 0) r = r.filter((c) => c.match_score >= minScore);
+    if (expFilter !== "any") {
+      const [lo, hi] = expFilter.split("-").map(Number);
+      r = r.filter((c) => c.years >= lo && c.years <= (hi || 99));
+    }
+    if (eduFilter !== "any") {
+      const q = eduFilter.toLowerCase();
+      r = r.filter((c) => c.education.toLowerCase().includes(q));
+    }
+    if (skillFilter !== "any") {
+      const q = skillFilter.toLowerCase();
+      r = r.filter((c) => c.skills.toLowerCase().includes(q));
+    }
     if (topN > 0) r = r.slice(0, topN);
     return r;
-  }, [results, search, topN, minScore]);
+  }, [results, search, topN, minScore, expFilter, eduFilter, skillFilter]);
+
+  // Reset page when filters change
+  useMemo(() => {
+    setPage(1);
+  }, [search, topN, minScore, expFilter, eduFilter, skillFilter, pageSize]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
+
+  // Build filter option lists from results
+  const educationOptions = useMemo(() => {
+    const opts = new Set<string>();
+    for (const r of results) {
+      const e = r.education.trim();
+      if (!e) continue;
+      if (/ph\.?d/i.test(e)) opts.add("Ph.D");
+      else if (/m\.?(s|sc|ba|tech|e\b)|master/i.test(e)) opts.add("Masters");
+      else if (/b\.?(s|sc|tech|e\b|com|a\b)|bachelor/i.test(e)) opts.add("Bachelors");
+      else if (/mba/i.test(e)) opts.add("MBA");
+    }
+    return Array.from(opts).sort();
+  }, [results]);
+
+  const skillOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of results) {
+      for (const s of r.matching_skills) counts.set(s, (counts.get(s) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([s]) => s);
+  }, [results]);
 
   const stats = useMemo(() => {
     const total = candidates.length;
     const processed = results.length;
     const top = results.filter((r) => r.match_score >= 70).length;
+    const top80 = results.filter((r) => r.match_score >= 80).length;
+    const highest = results.length > 0 ? results[0].match_score : 0;
     const avg =
       results.length > 0
         ? Math.round(
             (results.reduce((s, r) => s + r.match_score, 0) / results.length) * 10,
           ) / 10
         : 0;
-    return { total, processed, top, avg };
+    return { total, processed, top, top80, avg, highest };
   }, [candidates, results]);
+
+  const topCandidate = results[0];
 
   function exportCSV() {
     const csv = Papa.unparse(
@@ -163,6 +219,10 @@ function Dashboard() {
         Similarity: r.similarity.toFixed(4),
         Skills: r.skills,
         Experience: r.experience,
+        Education: r.education,
+        "Matching Skills": r.matching_skills.join(", "),
+        "Missing Skills": r.missing_skills.join(", "),
+        Recommendation: r.recommendation,
       })),
     );
     downloadBlob(csv, "ranked-candidates.csv", "text/csv");
@@ -178,6 +238,10 @@ function Dashboard() {
         Similarity: Number(r.similarity.toFixed(4)),
         Skills: r.skills,
         Experience: r.experience,
+        Education: r.education,
+        "Matching Skills": r.matching_skills.join(", "),
+        "Missing Skills": r.missing_skills.join(", "),
+        Recommendation: r.recommendation,
       })),
     );
     const wb = XLSX.utils.book_new();
