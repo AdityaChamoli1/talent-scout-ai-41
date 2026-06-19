@@ -367,38 +367,20 @@ function Dashboard() {
           </div>
         )}
 
+        {results.length > 0 && topCandidate && (
+          <TopCandidateCard c={topCandidate} />
+        )}
+
         {results.length > 0 && (
           <section className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">Ranked Candidates</h2>
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Ranked Candidates</h2>
+                <p className="text-xs text-muted-foreground">
+                  {filtered.length} of {results.length} candidates after filters
+                </p>
+              </div>
               <div className="flex flex-wrap items-center gap-2">
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search name, ID, skill…"
-                  className="rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <select
-                  value={topN}
-                  onChange={(e) => setTopN(Number(e.target.value))}
-                  className="rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value={0}>All ranks</option>
-                  <option value={10}>Top 10</option>
-                  <option value={25}>Top 25</option>
-                  <option value={50}>Top 50</option>
-                  <option value={100}>Top 100</option>
-                </select>
-                <select
-                  value={minScore}
-                  onChange={(e) => setMinScore(Number(e.target.value))}
-                  className="rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value={0}>Any score</option>
-                  <option value={50}>≥ 50%</option>
-                  <option value={70}>≥ 70%</option>
-                  <option value={80}>≥ 80%</option>
-                </select>
                 <button
                   onClick={exportCSV}
                   className="rounded-md border border-border bg-secondary px-3 py-1.5 text-sm hover:bg-secondary/70"
@@ -414,50 +396,151 @@ function Dashboard() {
               </div>
             </div>
 
+            <div className="grid grid-cols-2 gap-2 rounded-xl border border-border bg-card/60 p-3 md:grid-cols-6">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search name, skills, education…"
+                className="col-span-2 rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <select
+                value={topN}
+                onChange={(e) => setTopN(Number(e.target.value))}
+                className="rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm"
+              >
+                <option value={0}>All ranks</option>
+                <option value={10}>Top 10</option>
+                <option value={25}>Top 25</option>
+                <option value={50}>Top 50</option>
+                <option value={100}>Top 100</option>
+              </select>
+              <select
+                value={minScore}
+                onChange={(e) => setMinScore(Number(e.target.value))}
+                className="rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm"
+              >
+                <option value={0}>Any score</option>
+                <option value={50}>≥ 50%</option>
+                <option value={70}>≥ 70%</option>
+                <option value={80}>≥ 80%</option>
+              </select>
+              <select
+                value={expFilter}
+                onChange={(e) => setExpFilter(e.target.value)}
+                className="rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm"
+              >
+                <option value="any">Any experience</option>
+                <option value="0-2">0–2 yrs</option>
+                <option value="3-5">3–5 yrs</option>
+                <option value="6-9">6–9 yrs</option>
+                <option value="10-99">10+ yrs</option>
+              </select>
+              <select
+                value={eduFilter}
+                onChange={(e) => setEduFilter(e.target.value)}
+                className="rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm"
+              >
+                <option value="any">Any education</option>
+                {educationOptions.map((e) => (
+                  <option key={e} value={e}>
+                    {e}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={skillFilter}
+                onChange={(e) => setSkillFilter(e.target.value)}
+                className="col-span-2 rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm md:col-span-1"
+              >
+                <option value="any">Any skill</option>
+                {skillOptions.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="overflow-hidden rounded-xl border border-border bg-card">
-              <div className="max-h-[600px] overflow-auto">
+              <div className="overflow-auto">
                 <table className="w-full text-left text-sm">
-                  <thead className="sticky top-0 bg-card/95 backdrop-blur">
+                  <thead className="bg-card/95">
                     <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
-                      <th className="px-4 py-3">Rank</th>
+                      <th className="px-4 py-3 w-16">Rank</th>
                       <th className="px-4 py-3">Candidate</th>
                       <th className="px-4 py-3">Match</th>
-                      <th className="px-4 py-3">Skills</th>
                       <th className="px-4 py-3">Experience</th>
+                      <th className="px-4 py-3">Education</th>
+                      <th className="px-4 py-3">Skills match</th>
+                      <th className="px-4 py-3 w-12"></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((c) => (
-                      <tr
-                        key={c.candidate_id}
-                        className="border-b border-border/50 hover:bg-secondary/30"
-                      >
-                        <td className="px-4 py-3">
-                          <RankBadge rank={c.rank} />
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="font-medium text-foreground">
-                            {c.candidate_name}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {c.candidate_id}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <ScoreBar score={c.match_score} />
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground max-w-xs truncate">
-                          {c.skills}
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground max-w-xs truncate">
-                          {c.experience}
-                        </td>
-                      </tr>
-                    ))}
-                    {filtered.length === 0 && (
+                    {paged.map((c) => {
+                      const isOpen = expandedId === c.candidate_id;
+                      return (
+                        <>
+                          <tr
+                            key={c.candidate_id}
+                            className="border-b border-border/50 hover:bg-secondary/30 cursor-pointer"
+                            onClick={() =>
+                              setExpandedId(isOpen ? null : c.candidate_id)
+                            }
+                          >
+                            <td className="px-4 py-3">
+                              <RankBadge rank={c.rank} />
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-foreground">
+                                {c.candidate_name}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {c.candidate_id}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <ScoreBar score={c.match_score} />
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground max-w-[14rem] truncate">
+                              {c.experience || "—"}
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground max-w-[14rem] truncate">
+                              {c.education || "—"}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-1 text-xs">
+                                <span className="rounded-md bg-secondary px-2 py-0.5 text-foreground">
+                                  {c.matching_skills.length} match
+                                </span>
+                                {c.missing_skills.length > 0 && (
+                                  <span className="rounded-md border border-border px-2 py-0.5 text-muted-foreground">
+                                    {c.missing_skills.length} missing
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              <span
+                                className={`inline-block transition-transform ${isOpen ? "rotate-90" : ""}`}
+                              >
+                                ›
+                              </span>
+                            </td>
+                          </tr>
+                          {isOpen && (
+                            <tr className="bg-secondary/20">
+                              <td colSpan={7} className="px-6 py-4">
+                                <CandidateDetail c={c} />
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      );
+                    })}
+                    {paged.length === 0 && (
                       <tr>
                         <td
-                          colSpan={5}
+                          colSpan={7}
                           className="px-4 py-10 text-center text-sm text-muted-foreground"
                         >
                           No candidates match the current filters.
@@ -466,6 +549,41 @@ function Dashboard() {
                     )}
                   </tbody>
                 </table>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-card/60 px-4 py-2 text-xs text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <span>Rows per page</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                    className="rounded-md border border-border bg-input/40 px-2 py-1 text-xs"
+                  >
+                    <option value={10}>10</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page <= 1}
+                    className="rounded-md border border-border px-2 py-1 disabled:opacity-40 hover:bg-secondary/60"
+                  >
+                    ‹ Prev
+                  </button>
+                  <span>
+                    Page {page} / {pageCount}
+                  </span>
+                  <button
+                    onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                    disabled={page >= pageCount}
+                    className="rounded-md border border-border px-2 py-1 disabled:opacity-40 hover:bg-secondary/60"
+                  >
+                    Next ›
+                  </button>
+                </div>
               </div>
             </div>
           </section>
