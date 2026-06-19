@@ -656,23 +656,229 @@ function StatCard({
   );
 }
 
+const MEDAL_STYLES: Record<number, { bg: string; ring: string; label: string }> = {
+  1: {
+    bg: "linear-gradient(135deg, #f8d472, #b8860b)",
+    ring: "0 0 0 1px rgba(248,212,114,0.5)",
+    label: "GOLD",
+  },
+  2: {
+    bg: "linear-gradient(135deg, #e5e7eb, #9ca3af)",
+    ring: "0 0 0 1px rgba(229,231,235,0.4)",
+    label: "SILVER",
+  },
+  3: {
+    bg: "linear-gradient(135deg, #d8a36b, #8a5a2b)",
+    ring: "0 0 0 1px rgba(216,163,107,0.4)",
+    label: "BRONZE",
+  },
+};
+
 function RankBadge({ rank }: { rank: number }) {
-  const top = rank <= 3;
+  const medal = MEDAL_STYLES[rank];
+  if (medal) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <span
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-[#1a1a1a]"
+          style={{ background: medal.bg, boxShadow: medal.ring }}
+          title={medal.label}
+        >
+          {rank}
+        </span>
+      </div>
+    );
+  }
   return (
     <span
       className="inline-flex h-7 w-9 items-center justify-center rounded-md text-xs font-semibold"
-      style={
-        top
-          ? {
-              background: "var(--gradient-primary)",
-              color: "var(--primary-foreground)",
-            }
-          : { background: "var(--secondary)", color: "var(--secondary-foreground)" }
-      }
+      style={{ background: "var(--secondary)", color: "var(--secondary-foreground)" }}
     >
       #{rank}
     </span>
   );
+}
+
+function TopCandidateCard({ c }: { c: RankedCandidate }) {
+  return (
+    <section
+      className="relative overflow-hidden rounded-2xl border border-border p-6"
+      style={{ background: "var(--gradient-surface)", boxShadow: "var(--shadow-glow)" }}
+    >
+      <div
+        className="absolute -top-24 -right-24 h-64 w-64 rounded-full opacity-30 blur-3xl"
+        style={{ background: "var(--gradient-primary)" }}
+      />
+      <div className="relative grid gap-6 md:grid-cols-[auto_1fr_auto] md:items-center">
+        <div className="flex items-center gap-3">
+          <span
+            className="inline-flex h-12 w-12 items-center justify-center rounded-full text-base font-bold text-[#1a1a1a]"
+            style={{
+              background: "linear-gradient(135deg, #f8d472, #b8860b)",
+              boxShadow: "0 0 24px rgba(248,212,114,0.45)",
+            }}
+          >
+            1
+          </span>
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-accent">
+              Top Candidate
+            </div>
+            <div className="text-xl font-semibold">{c.candidate_name}</div>
+            <div className="text-xs text-muted-foreground">
+              {c.candidate_id} · {c.experience || "Experience n/a"}
+            </div>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-1.5">
+            {c.matching_skills.slice(0, 8).map((s) => (
+              <SkillChip key={s} label={s} matching />
+            ))}
+            {c.matching_skills.length === 0 && (
+              <span className="text-xs text-muted-foreground">
+                No required-skill matches detected
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">AI summary:</span>{" "}
+            {summarizeCandidate(c)}
+          </p>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+            Match Score
+          </div>
+          <div
+            className="bg-clip-text text-5xl font-bold text-transparent"
+            style={{ backgroundImage: "var(--gradient-primary)" }}
+          >
+            {c.match_score}%
+          </div>
+          <div className="mt-1 text-xs font-medium text-accent">{c.recommendation}</div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CandidateDetail({ c }: { c: RankedCandidate }) {
+  const strengths: string[] = [];
+  const improvements: string[] = [];
+  if (c.matching_skills.length >= 4) strengths.push("Strong overlap with required skill set");
+  if (c.years >= 5) strengths.push(`${c.years}+ years of relevant experience`);
+  if (/ph\.?d|master|m\.?s/i.test(c.education))
+    strengths.push("Advanced academic background");
+  if (c.certifications) strengths.push(`Certified: ${c.certifications}`);
+  if (c.matching_skills.length === 0)
+    strengths.push("Embedding match suggests relevant context beyond keywords");
+
+  if (c.missing_skills.length > 0)
+    improvements.push(`Could strengthen: ${c.missing_skills.slice(0, 4).join(", ")}`);
+  if (c.years < 3 && c.match_score < 75)
+    improvements.push("Limited years of hands-on experience for this role");
+  if (improvements.length === 0) improvements.push("No major gaps detected");
+
+  return (
+    <div className="grid gap-4 md:grid-cols-3">
+      <div className="md:col-span-2 space-y-3">
+        <div>
+          <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Matching skills ({c.matching_skills.length})
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {c.matching_skills.length === 0 ? (
+              <span className="text-xs text-muted-foreground">None detected</span>
+            ) : (
+              c.matching_skills.map((s) => <SkillChip key={s} label={s} matching />)
+            )}
+          </div>
+        </div>
+        <div>
+          <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Missing skills ({c.missing_skills.length})
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {c.missing_skills.length === 0 ? (
+              <span className="text-xs text-muted-foreground">None — full coverage</span>
+            ) : (
+              c.missing_skills.map((s) => <SkillChip key={s} label={s} />)
+            )}
+          </div>
+        </div>
+        {c.resume_summary && (
+          <div>
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Resume summary
+            </div>
+            <p className="text-sm text-foreground/90">{c.resume_summary}</p>
+          </div>
+        )}
+      </div>
+      <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            Hiring recommendation
+          </div>
+          <div className="mt-1 text-sm font-semibold text-accent">{c.recommendation}</div>
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Strengths
+          </div>
+          <ul className="space-y-1 text-xs text-foreground/90">
+            {strengths.map((s, i) => (
+              <li key={i}>✓ {s}</li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Improvement areas
+          </div>
+          <ul className="space-y-1 text-xs text-muted-foreground">
+            {improvements.map((s, i) => (
+              <li key={i}>• {s}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SkillChip({ label, matching }: { label: string; matching?: boolean }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium"
+      style={
+        matching
+          ? {
+              borderColor: "transparent",
+              background: "color-mix(in oklab, var(--accent) 20%, transparent)",
+              color: "var(--accent)",
+            }
+          : {
+              borderColor: "var(--border)",
+              color: "var(--muted-foreground)",
+            }
+      }
+    >
+      {matching ? "✓" : "✗"} {label}
+    </span>
+  );
+}
+
+function summarizeCandidate(c: RankedCandidate): string {
+  const parts: string[] = [];
+  if (c.years > 0) parts.push(`${c.years} yrs of experience`);
+  if (c.education) parts.push(c.education);
+  if (c.matching_skills.length > 0)
+    parts.push(`covers ${c.matching_skills.slice(0, 4).join(", ")}`);
+  if (c.missing_skills.length > 0)
+    parts.push(`gaps in ${c.missing_skills.slice(0, 3).join(", ")}`);
+  return parts.join(" · ") || c.resume_summary || "Strong semantic match against the JD.";
 }
 
 function ScoreBar({ score }: { score: number }) {
