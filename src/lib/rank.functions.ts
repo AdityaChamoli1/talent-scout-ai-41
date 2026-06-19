@@ -38,6 +38,35 @@ function profileText(c: Candidate): string {
     .toLowerCase();
 }
 
+const STOP = new Set([
+  "the","and","for","with","you","your","our","are","has","have","this","that","from","into","over","per","etc","ability","experience","experiences","work","working","role","team","teams","strong","good","great","plus","must","should","will","year","years","yr","yrs","using","use","used","new","also","including","include","across","within","level","senior","junior","mid","lead","principal","specialist","engineer","developer","scientist","comfortable","ideally","preferred","required","requirements","skills","skill","knowledge","proficient","familiarity","familiar","understanding","exposure","plus","etc","across","end","life","cycle","lifecycle","systems","system","models","model","production","research","deployment","build","built","building","develop","develops","developed","developing","ship","shipped","shipping","own","owning","fullstack","stack",
+]);
+
+function tokens(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9+#./ -]+/g, " ")
+    .split(/[\s,;|/]+/)
+    .map((t) => t.trim().replace(/^[-.]+|[-.]+$/g, ""))
+    .filter((t) => t.length >= 2 && t.length <= 30 && !STOP.has(t) && !/^\d+$/.test(t));
+}
+
+function skillTokens(text: string): Set<string> {
+  return new Set(tokens(text || ""));
+}
+
+function yearsFromExperience(exp: string): number {
+  const m = (exp || "").match(/(\d+(?:\.\d+)?)\s*(?:\+)?\s*(?:years?|yrs?)/i);
+  return m ? Number(m[1]) : 0;
+}
+
+function recommendation(score: number, matched: number, missing: number): string {
+  if (score >= 80 && missing <= 2) return "Highly Recommended";
+  if (score >= 70) return "Recommended";
+  if (score >= 55) return "Consider with reservations";
+  return "Not a strong fit";
+}
+
 function cosine(a: number[], b: number[]): number {
   let dot = 0;
   let na = 0;
@@ -119,13 +148,43 @@ export const rankCandidates = createServerFn({ method: "POST" })
         candidate_name: c.candidate_name,
         skills: c.skills ?? "",
         experience: c.experience ?? "",
+        education: c.education ?? "",
+        certifications: c.certifications ?? "",
+        resume_summary: c.resume_summary ?? "",
+        years: yearsFromExperience(c.experience ?? ""),
         similarity: sim,
-        match_score: Math.round(Math.max(0, Math.min(1, sim)) * 1000) / 10, // %
+        match_score: Math.round(Math.max(0, Math.min(1, sim)) * 1000) / 10,
       };
     });
 
-    scored.sort((a, b) => b.similarity - a.similarity);
-    return scored.map((s, idx) => ({ ...s, rank: idx + 1 }));
+    // Derive "required skills" from JD by intersecting JD tokens with the
+    // union of all candidate skill tokens (curated vocabulary of real skills).
+    const allSkillVocab = new Set<string>();
+    for (const c of data.candidates) {
+      for (const t of skillTokens(c.skills ?? "")) allSkillVocab.add(t);
+    }
+    const jdTokens = new Set(tokens(jd));
+    const requiredSkills = new Set<string>();
+    for (const t of jdTokens) if (allSkillVocab.has(t)) requiredSkills.add(t);
+
+    const enriched = scored.map((s) => {
+      const cSkills = skillTokens(s.skills);
+      const matching: string[] = [];
+      const missing: string[] = [];
+      for (const req of requiredSkills) {
+        if (cSkills.has(req)) matching.push(req);
+        else missing.push(req);
+      }
+      return {
+        ...s,
+        matching_skills: matching.sort(),
+        missing_skills: missing.sort(),
+        recommendation: recommendation(s.match_score, matching.length, missing.length),
+      };
+    });
+
+    enriched.sort((a, b) => b.similarity - a.similarity);
+    return enriched.map((s, idx) => ({ ...s, rank: idx + 1 }));
   });
 
 export type RankedCandidate = Awaited<ReturnType<typeof rankCandidates>>[number];

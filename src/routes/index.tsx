@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { useServerFn } from "@tanstack/react-start";
@@ -65,6 +65,12 @@ function Dashboard() {
   const [search, setSearch] = useState("");
   const [topN, setTopN] = useState<number>(0); // 0 = all
   const [minScore, setMinScore] = useState(0);
+  const [expFilter, setExpFilter] = useState<string>("any");
+  const [eduFilter, setEduFilter] = useState<string>("any");
+  const [skillFilter, setSkillFilter] = useState<string>("any");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   function handleFile(file: File) {
@@ -132,26 +138,76 @@ function Dashboard() {
         (c) =>
           c.candidate_name.toLowerCase().includes(q) ||
           c.candidate_id.toLowerCase().includes(q) ||
-          c.skills.toLowerCase().includes(q),
+          c.skills.toLowerCase().includes(q) ||
+          c.education.toLowerCase().includes(q),
       );
     }
     if (minScore > 0) r = r.filter((c) => c.match_score >= minScore);
+    if (expFilter !== "any") {
+      const [lo, hi] = expFilter.split("-").map(Number);
+      r = r.filter((c) => c.years >= lo && c.years <= (hi || 99));
+    }
+    if (eduFilter !== "any") {
+      const q = eduFilter.toLowerCase();
+      r = r.filter((c) => c.education.toLowerCase().includes(q));
+    }
+    if (skillFilter !== "any") {
+      const q = skillFilter.toLowerCase();
+      r = r.filter((c) => c.skills.toLowerCase().includes(q));
+    }
     if (topN > 0) r = r.slice(0, topN);
     return r;
-  }, [results, search, topN, minScore]);
+  }, [results, search, topN, minScore, expFilter, eduFilter, skillFilter]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [search, topN, minScore, expFilter, eduFilter, skillFilter, pageSize]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
+
+  // Build filter option lists from results
+  const educationOptions = useMemo(() => {
+    const opts = new Set<string>();
+    for (const r of results) {
+      const e = r.education.trim();
+      if (!e) continue;
+      if (/ph\.?d/i.test(e)) opts.add("Ph.D");
+      else if (/m\.?(s|sc|ba|tech|e\b)|master/i.test(e)) opts.add("Masters");
+      else if (/b\.?(s|sc|tech|e\b|com|a\b)|bachelor/i.test(e)) opts.add("Bachelors");
+      else if (/mba/i.test(e)) opts.add("MBA");
+    }
+    return Array.from(opts).sort();
+  }, [results]);
+
+  const skillOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of results) {
+      for (const s of r.matching_skills) counts.set(s, (counts.get(s) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([s]) => s);
+  }, [results]);
 
   const stats = useMemo(() => {
     const total = candidates.length;
     const processed = results.length;
     const top = results.filter((r) => r.match_score >= 70).length;
+    const top80 = results.filter((r) => r.match_score >= 80).length;
+    const highest = results.length > 0 ? results[0].match_score : 0;
     const avg =
       results.length > 0
         ? Math.round(
             (results.reduce((s, r) => s + r.match_score, 0) / results.length) * 10,
           ) / 10
         : 0;
-    return { total, processed, top, avg };
+    return { total, processed, top, top80, avg, highest };
   }, [candidates, results]);
+
+  const topCandidate = results[0];
 
   function exportCSV() {
     const csv = Papa.unparse(
@@ -163,6 +219,10 @@ function Dashboard() {
         Similarity: r.similarity.toFixed(4),
         Skills: r.skills,
         Experience: r.experience,
+        Education: r.education,
+        "Matching Skills": r.matching_skills.join(", "),
+        "Missing Skills": r.missing_skills.join(", "),
+        Recommendation: r.recommendation,
       })),
     );
     downloadBlob(csv, "ranked-candidates.csv", "text/csv");
@@ -178,6 +238,10 @@ function Dashboard() {
         Similarity: Number(r.similarity.toFixed(4)),
         Skills: r.skills,
         Experience: r.experience,
+        Education: r.education,
+        "Matching Skills": r.matching_skills.join(", "),
+        "Missing Skills": r.missing_skills.join(", "),
+        Recommendation: r.recommendation,
       })),
     );
     const wb = XLSX.utils.book_new();
@@ -199,11 +263,13 @@ function Dashboard() {
           <p className="mt-1 text-sm text-muted-foreground">
             Match candidates to any job description with AI semantic similarity.
           </p>
-          <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-4">
+          <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
             <StatCard label="Total Candidates" value={stats.total} />
-            <StatCard label="Processed" value={stats.processed} />
-            <StatCard label="Top Matches (≥70%)" value={stats.top} accent />
-            <StatCard label="Avg Match Score" value={`${stats.avg}%`} />
+            <StatCard label="Ranked" value={stats.processed} />
+            <StatCard label="Avg Match" value={`${stats.avg}%`} />
+            <StatCard label="Highest" value={`${stats.highest}%`} accent />
+            <StatCard label="≥ 70% Match" value={stats.top} />
+            <StatCard label="≥ 80% Match" value={stats.top80} />
           </div>
         </section>
 
@@ -301,38 +367,20 @@ function Dashboard() {
           </div>
         )}
 
+        {results.length > 0 && topCandidate && (
+          <TopCandidateCard c={topCandidate} />
+        )}
+
         {results.length > 0 && (
           <section className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">Ranked Candidates</h2>
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Ranked Candidates</h2>
+                <p className="text-xs text-muted-foreground">
+                  {filtered.length} of {results.length} candidates after filters
+                </p>
+              </div>
               <div className="flex flex-wrap items-center gap-2">
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search name, ID, skill…"
-                  className="rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <select
-                  value={topN}
-                  onChange={(e) => setTopN(Number(e.target.value))}
-                  className="rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value={0}>All ranks</option>
-                  <option value={10}>Top 10</option>
-                  <option value={25}>Top 25</option>
-                  <option value={50}>Top 50</option>
-                  <option value={100}>Top 100</option>
-                </select>
-                <select
-                  value={minScore}
-                  onChange={(e) => setMinScore(Number(e.target.value))}
-                  className="rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value={0}>Any score</option>
-                  <option value={50}>≥ 50%</option>
-                  <option value={70}>≥ 70%</option>
-                  <option value={80}>≥ 80%</option>
-                </select>
                 <button
                   onClick={exportCSV}
                   className="rounded-md border border-border bg-secondary px-3 py-1.5 text-sm hover:bg-secondary/70"
@@ -348,50 +396,150 @@ function Dashboard() {
               </div>
             </div>
 
+            <div className="grid grid-cols-2 gap-2 rounded-xl border border-border bg-card/60 p-3 md:grid-cols-6">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search name, skills, education…"
+                className="col-span-2 rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <select
+                value={topN}
+                onChange={(e) => setTopN(Number(e.target.value))}
+                className="rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm"
+              >
+                <option value={0}>All ranks</option>
+                <option value={10}>Top 10</option>
+                <option value={25}>Top 25</option>
+                <option value={50}>Top 50</option>
+                <option value={100}>Top 100</option>
+              </select>
+              <select
+                value={minScore}
+                onChange={(e) => setMinScore(Number(e.target.value))}
+                className="rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm"
+              >
+                <option value={0}>Any score</option>
+                <option value={50}>≥ 50%</option>
+                <option value={70}>≥ 70%</option>
+                <option value={80}>≥ 80%</option>
+              </select>
+              <select
+                value={expFilter}
+                onChange={(e) => setExpFilter(e.target.value)}
+                className="rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm"
+              >
+                <option value="any">Any experience</option>
+                <option value="0-2">0–2 yrs</option>
+                <option value="3-5">3–5 yrs</option>
+                <option value="6-9">6–9 yrs</option>
+                <option value="10-99">10+ yrs</option>
+              </select>
+              <select
+                value={eduFilter}
+                onChange={(e) => setEduFilter(e.target.value)}
+                className="rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm"
+              >
+                <option value="any">Any education</option>
+                {educationOptions.map((e) => (
+                  <option key={e} value={e}>
+                    {e}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={skillFilter}
+                onChange={(e) => setSkillFilter(e.target.value)}
+                className="col-span-2 rounded-md border border-border bg-input/40 px-3 py-1.5 text-sm md:col-span-1"
+              >
+                <option value="any">Any skill</option>
+                {skillOptions.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="overflow-hidden rounded-xl border border-border bg-card">
-              <div className="max-h-[600px] overflow-auto">
+              <div className="overflow-auto">
                 <table className="w-full text-left text-sm">
-                  <thead className="sticky top-0 bg-card/95 backdrop-blur">
+                  <thead className="bg-card/95">
                     <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
-                      <th className="px-4 py-3">Rank</th>
+                      <th className="px-4 py-3 w-16">Rank</th>
                       <th className="px-4 py-3">Candidate</th>
                       <th className="px-4 py-3">Match</th>
-                      <th className="px-4 py-3">Skills</th>
                       <th className="px-4 py-3">Experience</th>
+                      <th className="px-4 py-3">Education</th>
+                      <th className="px-4 py-3">Skills match</th>
+                      <th className="px-4 py-3 w-12"></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((c) => (
-                      <tr
-                        key={c.candidate_id}
-                        className="border-b border-border/50 hover:bg-secondary/30"
-                      >
-                        <td className="px-4 py-3">
-                          <RankBadge rank={c.rank} />
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="font-medium text-foreground">
-                            {c.candidate_name}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {c.candidate_id}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <ScoreBar score={c.match_score} />
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground max-w-xs truncate">
-                          {c.skills}
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground max-w-xs truncate">
-                          {c.experience}
-                        </td>
-                      </tr>
-                    ))}
-                    {filtered.length === 0 && (
+                    {paged.map((c) => {
+                      const isOpen = expandedId === c.candidate_id;
+                      return (
+                        <Fragment key={c.candidate_id}>
+                          <tr
+                            className="border-b border-border/50 hover:bg-secondary/30 cursor-pointer"
+                            onClick={() =>
+                              setExpandedId(isOpen ? null : c.candidate_id)
+                            }
+                          >
+                            <td className="px-4 py-3">
+                              <RankBadge rank={c.rank} />
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-foreground">
+                                {c.candidate_name}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {c.candidate_id}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <ScoreBar score={c.match_score} />
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground max-w-[14rem] truncate">
+                              {c.experience || "—"}
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground max-w-[14rem] truncate">
+                              {c.education || "—"}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-1 text-xs">
+                                <span className="rounded-md bg-secondary px-2 py-0.5 text-foreground">
+                                  {c.matching_skills.length} match
+                                </span>
+                                {c.missing_skills.length > 0 && (
+                                  <span className="rounded-md border border-border px-2 py-0.5 text-muted-foreground">
+                                    {c.missing_skills.length} missing
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              <span
+                                className={`inline-block transition-transform ${isOpen ? "rotate-90" : ""}`}
+                              >
+                                ›
+                              </span>
+                            </td>
+                          </tr>
+                          {isOpen && (
+                            <tr className="bg-secondary/20">
+                              <td colSpan={7} className="px-6 py-4">
+                                <CandidateDetail c={c} />
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                    {paged.length === 0 && (
                       <tr>
                         <td
-                          colSpan={5}
+                          colSpan={7}
                           className="px-4 py-10 text-center text-sm text-muted-foreground"
                         >
                           No candidates match the current filters.
@@ -400,6 +548,41 @@ function Dashboard() {
                     )}
                   </tbody>
                 </table>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-card/60 px-4 py-2 text-xs text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <span>Rows per page</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                    className="rounded-md border border-border bg-input/40 px-2 py-1 text-xs"
+                  >
+                    <option value={10}>10</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page <= 1}
+                    className="rounded-md border border-border px-2 py-1 disabled:opacity-40 hover:bg-secondary/60"
+                  >
+                    ‹ Prev
+                  </button>
+                  <span>
+                    Page {page} / {pageCount}
+                  </span>
+                  <button
+                    onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                    disabled={page >= pageCount}
+                    className="rounded-md border border-border px-2 py-1 disabled:opacity-40 hover:bg-secondary/60"
+                  >
+                    Next ›
+                  </button>
+                </div>
               </div>
             </div>
           </section>
@@ -472,23 +655,229 @@ function StatCard({
   );
 }
 
+const MEDAL_STYLES: Record<number, { bg: string; ring: string; label: string }> = {
+  1: {
+    bg: "linear-gradient(135deg, #f8d472, #b8860b)",
+    ring: "0 0 0 1px rgba(248,212,114,0.5)",
+    label: "GOLD",
+  },
+  2: {
+    bg: "linear-gradient(135deg, #e5e7eb, #9ca3af)",
+    ring: "0 0 0 1px rgba(229,231,235,0.4)",
+    label: "SILVER",
+  },
+  3: {
+    bg: "linear-gradient(135deg, #d8a36b, #8a5a2b)",
+    ring: "0 0 0 1px rgba(216,163,107,0.4)",
+    label: "BRONZE",
+  },
+};
+
 function RankBadge({ rank }: { rank: number }) {
-  const top = rank <= 3;
+  const medal = MEDAL_STYLES[rank];
+  if (medal) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <span
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-[#1a1a1a]"
+          style={{ background: medal.bg, boxShadow: medal.ring }}
+          title={medal.label}
+        >
+          {rank}
+        </span>
+      </div>
+    );
+  }
   return (
     <span
       className="inline-flex h-7 w-9 items-center justify-center rounded-md text-xs font-semibold"
-      style={
-        top
-          ? {
-              background: "var(--gradient-primary)",
-              color: "var(--primary-foreground)",
-            }
-          : { background: "var(--secondary)", color: "var(--secondary-foreground)" }
-      }
+      style={{ background: "var(--secondary)", color: "var(--secondary-foreground)" }}
     >
       #{rank}
     </span>
   );
+}
+
+function TopCandidateCard({ c }: { c: RankedCandidate }) {
+  return (
+    <section
+      className="relative overflow-hidden rounded-2xl border border-border p-6"
+      style={{ background: "var(--gradient-surface)", boxShadow: "var(--shadow-glow)" }}
+    >
+      <div
+        className="absolute -top-24 -right-24 h-64 w-64 rounded-full opacity-30 blur-3xl"
+        style={{ background: "var(--gradient-primary)" }}
+      />
+      <div className="relative grid gap-6 md:grid-cols-[auto_1fr_auto] md:items-center">
+        <div className="flex items-center gap-3">
+          <span
+            className="inline-flex h-12 w-12 items-center justify-center rounded-full text-base font-bold text-[#1a1a1a]"
+            style={{
+              background: "linear-gradient(135deg, #f8d472, #b8860b)",
+              boxShadow: "0 0 24px rgba(248,212,114,0.45)",
+            }}
+          >
+            1
+          </span>
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-accent">
+              Top Candidate
+            </div>
+            <div className="text-xl font-semibold">{c.candidate_name}</div>
+            <div className="text-xs text-muted-foreground">
+              {c.candidate_id} · {c.experience || "Experience n/a"}
+            </div>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-1.5">
+            {c.matching_skills.slice(0, 8).map((s) => (
+              <SkillChip key={s} label={s} matching />
+            ))}
+            {c.matching_skills.length === 0 && (
+              <span className="text-xs text-muted-foreground">
+                No required-skill matches detected
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">AI summary:</span>{" "}
+            {summarizeCandidate(c)}
+          </p>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+            Match Score
+          </div>
+          <div
+            className="bg-clip-text text-5xl font-bold text-transparent"
+            style={{ backgroundImage: "var(--gradient-primary)" }}
+          >
+            {c.match_score}%
+          </div>
+          <div className="mt-1 text-xs font-medium text-accent">{c.recommendation}</div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CandidateDetail({ c }: { c: RankedCandidate }) {
+  const strengths: string[] = [];
+  const improvements: string[] = [];
+  if (c.matching_skills.length >= 4) strengths.push("Strong overlap with required skill set");
+  if (c.years >= 5) strengths.push(`${c.years}+ years of relevant experience`);
+  if (/ph\.?d|master|m\.?s/i.test(c.education))
+    strengths.push("Advanced academic background");
+  if (c.certifications) strengths.push(`Certified: ${c.certifications}`);
+  if (c.matching_skills.length === 0)
+    strengths.push("Embedding match suggests relevant context beyond keywords");
+
+  if (c.missing_skills.length > 0)
+    improvements.push(`Could strengthen: ${c.missing_skills.slice(0, 4).join(", ")}`);
+  if (c.years < 3 && c.match_score < 75)
+    improvements.push("Limited years of hands-on experience for this role");
+  if (improvements.length === 0) improvements.push("No major gaps detected");
+
+  return (
+    <div className="grid gap-4 md:grid-cols-3">
+      <div className="md:col-span-2 space-y-3">
+        <div>
+          <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Matching skills ({c.matching_skills.length})
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {c.matching_skills.length === 0 ? (
+              <span className="text-xs text-muted-foreground">None detected</span>
+            ) : (
+              c.matching_skills.map((s) => <SkillChip key={s} label={s} matching />)
+            )}
+          </div>
+        </div>
+        <div>
+          <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Missing skills ({c.missing_skills.length})
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {c.missing_skills.length === 0 ? (
+              <span className="text-xs text-muted-foreground">None — full coverage</span>
+            ) : (
+              c.missing_skills.map((s) => <SkillChip key={s} label={s} />)
+            )}
+          </div>
+        </div>
+        {c.resume_summary && (
+          <div>
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Resume summary
+            </div>
+            <p className="text-sm text-foreground/90">{c.resume_summary}</p>
+          </div>
+        )}
+      </div>
+      <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            Hiring recommendation
+          </div>
+          <div className="mt-1 text-sm font-semibold text-accent">{c.recommendation}</div>
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Strengths
+          </div>
+          <ul className="space-y-1 text-xs text-foreground/90">
+            {strengths.map((s, i) => (
+              <li key={i}>✓ {s}</li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Improvement areas
+          </div>
+          <ul className="space-y-1 text-xs text-muted-foreground">
+            {improvements.map((s, i) => (
+              <li key={i}>• {s}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SkillChip({ label, matching }: { label: string; matching?: boolean }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium"
+      style={
+        matching
+          ? {
+              borderColor: "transparent",
+              background: "color-mix(in oklab, var(--accent) 20%, transparent)",
+              color: "var(--accent)",
+            }
+          : {
+              borderColor: "var(--border)",
+              color: "var(--muted-foreground)",
+            }
+      }
+    >
+      {matching ? "✓" : "✗"} {label}
+    </span>
+  );
+}
+
+function summarizeCandidate(c: RankedCandidate): string {
+  const parts: string[] = [];
+  if (c.years > 0) parts.push(`${c.years} yrs of experience`);
+  if (c.education) parts.push(c.education);
+  if (c.matching_skills.length > 0)
+    parts.push(`covers ${c.matching_skills.slice(0, 4).join(", ")}`);
+  if (c.missing_skills.length > 0)
+    parts.push(`gaps in ${c.missing_skills.slice(0, 3).join(", ")}`);
+  return parts.join(" · ") || c.resume_summary || "Strong semantic match against the JD.";
 }
 
 function ScoreBar({ score }: { score: number }) {
