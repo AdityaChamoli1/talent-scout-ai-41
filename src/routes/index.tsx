@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { useServerFn } from "@tanstack/react-start";
@@ -160,7 +160,7 @@ function Dashboard() {
   }, [results, search, topN, minScore, expFilter, eduFilter, skillFilter]);
 
   // Reset page when filters change
-  useMemo(() => {
+  useEffect(() => {
     setPage(1);
   }, [search, topN, minScore, expFilter, eduFilter, skillFilter, pageSize]);
 
@@ -479,9 +479,8 @@ function Dashboard() {
                     {paged.map((c) => {
                       const isOpen = expandedId === c.candidate_id;
                       return (
-                        <>
+                        <Fragment key={c.candidate_id}>
                           <tr
-                            key={c.candidate_id}
                             className="border-b border-border/50 hover:bg-secondary/30 cursor-pointer"
                             onClick={() =>
                               setExpandedId(isOpen ? null : c.candidate_id)
@@ -534,7 +533,7 @@ function Dashboard() {
                               </td>
                             </tr>
                           )}
-                        </>
+                        </Fragment>
                       );
                     })}
                     {paged.length === 0 && (
