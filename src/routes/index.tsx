@@ -589,7 +589,7 @@ function Dashboard() {
         )}
       </main>
       <footer className="border-t border-border py-6 text-center text-xs text-muted-foreground">
-        Intelligent Candidate Discovery · Powered by Lovable AI embeddings
+        Intelligent Candidate Discovery · Powered by Advanced AI Matching
       </footer>
     </div>
   );
