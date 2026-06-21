@@ -102,6 +102,30 @@ async function embed(input: string | string[], apiKey: string): Promise<number[]
   return out;
 }
 
+// Lexical fallback used when LOVABLE_API_KEY is not configured (e.g. on a
+// fresh Vercel deployment without the env var set). Builds simple
+// token-frequency vectors over a shared vocabulary so cosine similarity is
+// still meaningful — lower quality than semantic embeddings but keeps the
+// demo fully functional without any external API.
+function lexicalVectors(texts: string[]): number[][] {
+  const docs = texts.map((t) => tokens(t));
+  const vocab = new Map<string, number>();
+  for (const doc of docs) {
+    for (const tok of doc) {
+      if (!vocab.has(tok)) vocab.set(tok, vocab.size);
+    }
+  }
+  const dim = vocab.size || 1;
+  return docs.map((doc) => {
+    const v = new Array(dim).fill(0);
+    for (const tok of doc) {
+      const i = vocab.get(tok);
+      if (i !== undefined) v[i] += 1;
+    }
+    return v;
+  });
+}
+
 export const rankCandidates = createServerFn({ method: "POST" })
   .inputValidator((data: RankInput) => {
     if (!data || typeof data.jobDescription !== "string" || !data.jobDescription.trim()) {
@@ -117,28 +141,38 @@ export const rankCandidates = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }) => {
     const apiKey = process.env.LOVABLE_API_KEY;
-    if (!apiKey) throw new Error("LOVABLE_API_KEY not configured");
-
     const jd = data.jobDescription.replace(/\s+/g, " ").trim().toLowerCase();
     const profiles = data.candidates.map(profileText);
 
-    const [jdVec] = await embed(jd, apiKey);
+    let jdVec: number[];
+    let vectors: number[][];
 
-    const vectors: number[][] = new Array(profiles.length);
-    const batches: { start: number; inputs: string[] }[] = [];
-    for (let i = 0; i < profiles.length; i += BATCH) {
-      batches.push({ start: i, inputs: profiles.slice(i, i + BATCH) });
-    }
-
-    // Run up to 4 batches in parallel
-    const CONCURRENCY = 4;
-    for (let i = 0; i < batches.length; i += CONCURRENCY) {
-      const slice = batches.slice(i, i + CONCURRENCY);
-      const results = await Promise.all(slice.map((b) => embed(b.inputs, apiKey)));
-      slice.forEach((b, idx) => {
-        const vecs = results[idx];
-        for (let j = 0; j < vecs.length; j++) vectors[b.start + j] = vecs[j];
-      });
+    if (apiKey) {
+      [jdVec] = await embed(jd, apiKey);
+      vectors = new Array(profiles.length);
+      const batches: { start: number; inputs: string[] }[] = [];
+      for (let i = 0; i < profiles.length; i += BATCH) {
+        batches.push({ start: i, inputs: profiles.slice(i, i + BATCH) });
+      }
+      const CONCURRENCY = 4;
+      for (let i = 0; i < batches.length; i += CONCURRENCY) {
+        const slice = batches.slice(i, i + CONCURRENCY);
+        const results = await Promise.all(slice.map((b) => embed(b.inputs, apiKey)));
+        slice.forEach((b, idx) => {
+          const vecs = results[idx];
+          for (let j = 0; j < vecs.length; j++) vectors[b.start + j] = vecs[j];
+        });
+      }
+    } else {
+      // Graceful fallback — no AI key configured. Use lexical token vectors
+      // so ranking still works (lower quality, no semantic understanding).
+      console.warn(
+        "[rankCandidates] LOVABLE_API_KEY not set — falling back to lexical scoring. " +
+          "Set LOVABLE_API_KEY in your deployment environment for AI-powered semantic ranking.",
+      );
+      const all = lexicalVectors([jd, ...profiles]);
+      jdVec = all[0];
+      vectors = all.slice(1);
     }
 
     const scored = data.candidates.map((c, i) => {
